@@ -59,15 +59,15 @@ struct SVFPass : public ModulePass {
     return {out.begin(), out.end()};
   }
 
-  void
-  SVFTypeInfer(SVF::SVFIR *svfir, SVF::AndersenWaveDiff *ander,
-               std::map<const Value *, std::set<std::string>> &objectsTypes,
-               std::map<const Value *, std::set<const Value *>> &aliases) {
+  void SVFGetAlias(SVF::SVFIR *svfir, SVF::AndersenWaveDiff *ander,
+                   std::set<const Value *> &targets,
+                   std::map<const Value *, std::set<const Value *>> &aliases) {
 
-    for (auto &pair : objectsTypes) {
-      auto Val = pair.first;
-      auto typeSet = pair.second;
+    errs() << "[SVF 2.9] Running SVF to get aliases" << "\n";
 
+    for (auto Val : targets) {
+
+      // get its svf value
       SVF::SVFValue *svfVal =
           SVF::LLVMModuleSet::getLLVMModuleSet()->getSVFValue(Val);
 
@@ -89,10 +89,6 @@ struct SVFPass : public ModulePass {
                     objAliasSvfVal);
 
             aliases[Val].insert(objAliasllvmVal);
-
-            auto typestr = getTypeStr(objAliasllvmVal->getType());
-
-            objectsTypes[Val].insert(typestr);
           }
         }
 
@@ -100,12 +96,30 @@ struct SVFPass : public ModulePass {
         errs() << "[SVF 2.9] This pointer is not tracked: " << *Val << "\n";
       }
     }
+  }
+
+  void
+  SVFTypeInfer(std::set<const Value *> targets,
+               std::map<const Value *, std::set<const Value *>> &aliases,
+               std::map<const Value *, std::set<std::string>> &objectsTypes) {
 
     return;
   }
 
   void dumpResults(std::map<const Value *, std::set<std::string>> objectsTypes,
                    std::map<const Value *, std::set<const Value *>> aliases) {
+
+    errs() << "Printing aliases..." << "\n";
+    for (auto &pair : aliases) {
+      auto val = pair.first;
+      auto aliasSet = pair.second;
+
+      errs() << "Value: " << *val << " has alias: " << "\n";
+
+      for (auto v : aliasSet) {
+        errs() << *v << "\n";
+      }
+    }
 
     for (auto &pair : objectsTypes) {
       auto val = pair.first;
@@ -129,6 +143,7 @@ struct SVFPass : public ModulePass {
 
   bool runOnModule(Module &M) override {
 
+    std::set<const Value *> targets;
     std::map<const Value *, std::set<const Value *>> aliases;
     std::map<const Value *, std::set<std::string>> objectsTypes;
 
@@ -149,23 +164,23 @@ struct SVFPass : public ModulePass {
     //  run Andersen's Analysis
     auto ander = SVF::AndersenWaveDiff::createAndersenWaveDiff(svfir);
 
-    // init the object types for every load and store
+    // we ar interested in the type usage consistency for every store
     for (auto &F : M) {
       for (auto &bb : F) {
         for (auto &I : bb) {
-          if (LoadInst *LI = dyn_cast<LoadInst>(&I)) {
-            auto typestr = getTypeStr(LI->getPointerOperandType());
-            objectsTypes[LI].insert(typestr);
-          } else if (StoreInst *SI = dyn_cast<StoreInst>(&I)) {
-            auto typestr = getTypeStr(SI->getPointerOperandType());
-            objectsTypes[SI].insert(typestr);
+          // if(LoadInst *LI = dyn_cast<LoadInst>(&I)){
+          // }
+          if (StoreInst *SI = dyn_cast<StoreInst>(&I)) {
+            auto ptrinst = SI->getPointerOperand();
+            targets.insert(ptrinst);
           }
         }
       }
     }
 
     // type inferece for the obj types
-    SVFTypeInfer(svfir, ander, objectsTypes, aliases);
+    SVFGetAlias(svfir, ander, targets, aliases);
+    SVFTypeInfer(targets, aliases, objectsTypes);
 
     dumpResults(objectsTypes, aliases);
 

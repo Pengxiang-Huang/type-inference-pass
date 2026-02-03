@@ -1,16 +1,26 @@
 [SVF 2.9] Running Andersen Pointer Analysis...
-[LLVM] Type Inconsistent Use
-[LLVM] Pointer Value:   %4 = load i32*, i32** %3, align 8, !dbg !20
-[LLVM] points to:   %2 = alloca i32, align 4
-[LLVM] points to:   %3 = alloca i32*, align 8
-[LLVM] points to:   %5 = load i32*, i32** %3, align 8, !dbg !22
-[LLVM] has type: i32*
-[LLVM] has type: i32**
-[LLVM] Type Inconsistent Use
-[LLVM] Pointer Value:   %5 = load i32*, i32** %3, align 8, !dbg !22
-[LLVM] points to:   %2 = alloca i32, align 4
-[LLVM] points to:   %3 = alloca i32*, align 8
-[LLVM] points to:   %4 = load i32*, i32** %3, align 8, !dbg !20
-[LLVM] has type: i32*
-[LLVM] has type: i32**
-[SVF 2.9] Cleanning up SVF results...
+opt: /u/phuang19/tools/llvm/llvm-project/llvm/lib/IR/Type.cpp:749: static PointerType *llvm::PointerType::get(LLVMContext &, unsigned int): Assertion `CImpl->getOpaquePointers() && "Can only create opaque pointers in opaque pointer mode"' failed.
+PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace.
+Stack dump:
+0.	Program arguments: opt -enable-new-pm=0 -load ../../install/lib/SVFTypeInferPass.so -svf-pass test.ll -o test_opt.bc
+1.	Running pass 'SVF Pass for type inference' on module 'test.ll'.
+ #0 0x00007f0ee0510ec4 llvm::sys::PrintStackTrace(llvm::raw_ostream&, int) (/u/phuang19/tools/llvm/14.0.0-sharedlib/lib/libLLVM-14.so+0x1deec4)
+ #1 0x00007f0ee050ec2e llvm::sys::RunSignalHandlers() (/u/phuang19/tools/llvm/14.0.0-sharedlib/lib/libLLVM-14.so+0x1dcc2e)
+ #2 0x00007f0ee0511368 SignalHandler(int) Signals.cpp:0:0
+ #3 0x00007f0edfd3a040 __restore_rt (/lib64/libc.so.6+0x1a040)
+ #4 0x00007f0edfd93e5c __pthread_kill_implementation (/lib64/libc.so.6+0x73e5c)
+ #5 0x00007f0edfd39f0e gsignal (/lib64/libc.so.6+0x19f0e)
+ #6 0x00007f0edfd216d0 abort (/lib64/libc.so.6+0x16d0)
+ #7 0x00007f0edfd21639 __assert_perror_fail (/lib64/libc.so.6+0x1639)
+ #8 0x00007f0ee06dfd4b (/u/phuang19/tools/llvm/14.0.0-sharedlib/lib/libLLVM-14.so+0x3add4b)
+ #9 0x00007f0edf34dae7 llvm::PointerType::getUnqual(llvm::LLVMContext&) (../../install/lib/SVFTypeInferPass.so+0x90ae7)
+#10 0x00007f0edf34a24d SVF::ObjTypeInference::ptrType() (../../install/lib/SVFTypeInferPass.so+0x8d24d)
+#11 0x00007f0edf343add SVF::LLVMModuleSet::createSVFDataStructure() (../../install/lib/SVFTypeInferPass.so+0x86add)
+#12 0x00007f0edf340a91 SVF::LLVMModuleSet::build() (../../install/lib/SVFTypeInferPass.so+0x83a91)
+#13 0x00007f0edf340695 SVF::LLVMModuleSet::buildSVFModule(llvm::Module&) (../../install/lib/SVFTypeInferPass.so+0x83695)
+#14 0x00007f0edf328152 (anonymous namespace)::SVFPass::runOnModule(llvm::Module&) SVFTypeInferPass.cpp:0:0
+#15 0x00007f0ee0684ccb llvm::legacy::PassManagerImpl::run(llvm::Module&) (/u/phuang19/tools/llvm/14.0.0-sharedlib/lib/libLLVM-14.so+0x352ccb)
+#16 0x0000000000420ff7 main (/home/vax12/u57/phuang19/tools/llvm/14.0.0-sharedlib/bin/opt+0x420ff7)
+#17 0x00007f0edfd23575 __libc_start_call_main (/lib64/libc.so.6+0x3575)
+#18 0x00007f0edfd23628 __libc_start_main@GLIBC_2.2.5 (/lib64/libc.so.6+0x3628)
+#19 0x0000000000404e05 _start (/home/vax12/u57/phuang19/tools/llvm/14.0.0-sharedlib/bin/opt+0x404e05)

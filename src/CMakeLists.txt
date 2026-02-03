@@ -8,4 +8,4 @@ install(TARGETS SVFTypeInferPass
 	LIBRARY DESTINATION lib
 )
 
-target_link_libraries(SVFTypeInferPass PRIVATE SvfLLVM)
+target_link_libraries(SVFTypeInferPass PRIVATE SvfLLVM SvfCore)

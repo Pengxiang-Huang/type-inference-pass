@@ -8,4 +8,7 @@ build/
 
 *.txt
 
+# binary file for tests
+test
+
 .cache/

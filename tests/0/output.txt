@@ -1,0 +1,16 @@
+[SVF 2.9] Running Andersen Pointer Analysis...
+[LLVM] Type Inconsistent Use
+[LLVM] Pointer Value:   %4 = load i32*, i32** %3, align 8, !dbg !20
+[LLVM] points to:   %2 = alloca i32, align 4
+[LLVM] points to:   %3 = alloca i32*, align 8
+[LLVM] points to:   %5 = load i32*, i32** %3, align 8, !dbg !22
+[LLVM] has type: i32*
+[LLVM] has type: i32**
+[LLVM] Type Inconsistent Use
+[LLVM] Pointer Value:   %5 = load i32*, i32** %3, align 8, !dbg !22
+[LLVM] points to:   %2 = alloca i32, align 4
+[LLVM] points to:   %3 = alloca i32*, align 8
+[LLVM] points to:   %4 = load i32*, i32** %3, align 8, !dbg !20
+[LLVM] has type: i32*
+[LLVM] has type: i32**
+[SVF 2.9] Cleanning up SVF results...

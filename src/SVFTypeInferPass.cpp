@@ -20,14 +20,40 @@ using namespace llvm;
 
 namespace {
 
+struct InstTypeVisitor : InstVisitor<InstTypeVisitor> {
+
+  std::map<const Value *, std::set<Type *>> &objectsTypes;
+
+  InstTypeVisitor(std::map<const Value *, std::set<Type *>> &objectsTypes)
+      : objectsTypes(objectsTypes) {}
+
+  // unhandled instruction
+  void visitInstruction(Instruction &I) {
+    errs() << "unhandled visiting: " << I << "\n";
+  }
+
+  void visitLoadInst(LoadInst &I) {
+    auto ty = I.getType();
+    objectsTypes[&I].insert(ty);
+  }
+
+  void visitStoreInst(StoreInst &I) {
+    auto ty = I.getValueOperand()->getType();
+    objectsTypes[&I].insert(ty);
+  }
+};
+
 struct SVFPass : public ModulePass {
   static char ID;
   SVFPass() : ModulePass(ID) {}
 
   static std::string getTypeStr(Type *t) {
 
-    if (!t)
-      return "BlackHole";
+    if (!t) {
+      errs() << "type can not be empty"
+             << "\n";
+      abort();
+    }
 
     std::string str;
     raw_string_ostream rso(str);
@@ -35,35 +61,42 @@ struct SVFPass : public ModulePass {
     return rso.str();
   }
 
-  static std::unordered_set<SVF::NodeID>
-  getAliasCandidatesByRevPts(SVF::PointerAnalysis *pta, SVF::NodeID p,
-                             bool include_self = false) {
-    std::unordered_set<SVF::NodeID> out;
+  static void
+  getAliases(const Value *Val,
+             std::map<const Value *, std::set<const Value *>> &aliases,
+             SVF::SVFIR *svfir, SVF::PointerAnalysis *pta, SVF::NodeID p) {
 
-    // objects
-    const auto &pts = pta->getPts(p);
+    auto validPtrsNodes = svfir->getAllValidPtrs();
 
-    for (SVF::NodeID o : pts) {
+    for (auto nodeid : validPtrsNodes) {
 
-      // pointers
-      const auto &rev = pta->getRevPts(o);
+      // if (svfir->isBlkPtr(nodeid)) errs() << "catch a black hole ptr\n";
 
-      for (SVF::NodeID q : rev) {
-        out.insert(q);
+      auto node = svfir->getGNode(nodeid);
+
+      if (!node->hasValue())
+        continue;
+
+      auto nodeValue = node->getValue();
+
+      auto llvmVal =
+          SVF::LLVMModuleSet::getLLVMModuleSet()->getLLVMValue(nodeValue);
+
+      auto aliasResult = pta->alias(p, nodeid);
+
+      if (aliasResult != SVF::NoAlias) {
+        aliases[Val].insert(llvmVal);
       }
     }
-
-    if (!include_self)
-      out.erase(p);
-
-    return {out.begin(), out.end()};
   }
 
   void SVFGetAlias(SVF::SVFIR *svfir, SVF::AndersenWaveDiff *ander,
                    std::set<const Value *> &targets,
+                   std::set<const Value *> &typeUnknown,
                    std::map<const Value *, std::set<const Value *>> &aliases) {
 
-    errs() << "[SVF 2.9] Running SVF to get aliases" << "\n";
+    errs() << "[SVF 2.9] Running SVF to get aliases"
+           << "\n";
 
     for (auto Val : targets) {
 
@@ -74,23 +107,20 @@ struct SVFPass : public ModulePass {
       // check if svf tracks this pointer
       if (svfVal && svfir->hasValueNode(svfVal)) {
 
+        // check if its a black hole or null pointer
+        if (svfVal->isblackHole() || svfVal->isNullPtr()) {
+
+          typeUnknown.insert(Val);
+          errs() << "unknown alias for val: " << *Val << "\n";
+
+          // not tracked further
+          continue;
+        }
+
+        // get svf node id to query all the aliases
         auto ptrNodeId = svfir->getValueNode(svfVal);
 
-        auto objAliasIdSet = getAliasCandidatesByRevPts(ander, ptrNodeId);
-
-        for (auto objAliasId : objAliasIdSet) {
-
-          auto *node = svfir->getGNode(objAliasId);
-
-          if (node->hasValue()) {
-            auto objAliasSvfVal = node->getValue();
-            auto objAliasllvmVal =
-                SVF::LLVMModuleSet::getLLVMModuleSet()->getLLVMValue(
-                    objAliasSvfVal);
-
-            aliases[Val].insert(objAliasllvmVal);
-          }
-        }
+        getAliases(Val, aliases, svfir, ander, ptrNodeId);
 
       } else {
         errs() << "[SVF 2.9] This pointer is not tracked: " << *Val << "\n";
@@ -98,28 +128,65 @@ struct SVFPass : public ModulePass {
     }
   }
 
-  void
-  SVFTypeInfer(std::set<const Value *> targets,
-               std::map<const Value *, std::set<const Value *>> &aliases,
-               std::map<const Value *, std::set<std::string>> &objectsTypes) {
+  void TypeInfer(std::map<const Value *, std::set<const Value *>> &aliases,
+                 std::map<const Value *, std::set<Type *>> &objectsTypes) {
+
+    // InstTypeVisitor visitor(objectsTypes);
+
+    for (auto &pair : aliases) {
+
+      auto v = pair.first;
+      auto aliasSet = pair.second;
+
+      for (auto &aliasV : aliasSet) {
+
+        auto constInst = static_cast<const Instruction *>(aliasV);
+
+        // cast to non const for the llvm visitor
+        auto inst = const_cast<Instruction *>(constInst);
+
+        // visitor.visit(inst)	;
+        //
+        auto loadInst = dyn_cast<LoadInst>(inst);
+        auto storeInst = dyn_cast<StoreInst>(constInst);
+
+        // now only check the use of load or store
+        if (loadInst) {
+          objectsTypes[v].insert(loadInst->getType());
+        }
+        if (storeInst) {
+          objectsTypes[v].insert(storeInst->getValueOperand()->getType());
+        }
+      }
+    }
 
     return;
   }
 
-  void dumpResults(std::map<const Value *, std::set<std::string>> objectsTypes,
-                   std::map<const Value *, std::set<const Value *>> aliases) {
+  void dumpResults(std::map<const Value *, std::set<Type *>> &objectsTypes,
+                   std::map<const Value *, std::set<const Value *>> aliases,
+                   std::set<const Value *> typeUnknown) {
 
-    errs() << "Printing aliases..." << "\n";
+    errs() << "Printing aliases..."
+           << "\n";
     for (auto &pair : aliases) {
       auto val = pair.first;
       auto aliasSet = pair.second;
 
-      errs() << "Value: " << *val << " has alias: " << "\n";
+      errs() << "Value: " << *val << " has alias: "
+             << "\n";
 
       for (auto v : aliasSet) {
         errs() << *v << "\n";
       }
     }
+
+    errs() << "Type Unknowns: " << "\n";
+    for (auto &v : typeUnknown) {
+      errs() << v << "\n";
+    }
+
+    errs() << "objectsType size: " << objectsTypes.size() << "\n";
 
     for (auto &pair : objectsTypes) {
       auto val = pair.first;
@@ -128,15 +195,16 @@ struct SVFPass : public ModulePass {
       if (typeSet.size() == 1)
         continue;
 
-      errs() << "[LLVM] Type Inconsistent Use" << "\n";
-      errs() << "[LLVM] Pointer Value: " << *val << "\n";
+      errs() << "Type Inconsistent Use"
+             << "\n";
+      errs() << "Pointer Value: " << *val << "\n";
 
-      for (auto ptrv : aliases[val]) {
-        errs() << "[LLVM] points to: " << *ptrv << "\n";
-      }
+      // for (auto ptrv : aliases[val]) {
+      //   errs() << "points to: " << *ptrv << "\n";
+      // }
 
       for (auto type : typeSet) {
-        errs() << "[LLVM] has type: " << type << "\n";
+        errs() << "has type: " << getTypeStr(type) << "\n";
       }
     }
   }
@@ -144,10 +212,12 @@ struct SVFPass : public ModulePass {
   bool runOnModule(Module &M) override {
 
     std::set<const Value *> targets;
+    std::set<const Value *> typeUnknown;
     std::map<const Value *, std::set<const Value *>> aliases;
-    std::map<const Value *, std::set<std::string>> objectsTypes;
+    std::map<const Value *, std::set<Type *>> objectsTypes;
 
-    errs() << "[SVF 2.9] Running Andersen Pointer Analysis..." << "\n";
+    errs() << "[SVF 2.9] Running Andersen Pointer Analysis..."
+           << "\n";
 
     // select the pointer analysis to andersen
     SVF::Options::PASelected.parseAndSetValue("ander");
@@ -164,7 +234,7 @@ struct SVFPass : public ModulePass {
     //  run Andersen's Analysis
     auto ander = SVF::AndersenWaveDiff::createAndersenWaveDiff(svfir);
 
-    // we ar interested in the type usage consistency for every store
+    // we are interested in the type usage consistency for every store
     for (auto &F : M) {
       for (auto &bb : F) {
         for (auto &I : bb) {
@@ -178,14 +248,17 @@ struct SVFPass : public ModulePass {
       }
     }
 
-    // type inferece for the obj types
-    SVFGetAlias(svfir, ander, targets, aliases);
-    SVFTypeInfer(targets, aliases, objectsTypes);
+    // use SVF to get the aliases
+    SVFGetAlias(svfir, ander, targets, typeUnknown, aliases);
 
-    dumpResults(objectsTypes, aliases);
+    // type inferece for the obj types
+    TypeInfer(aliases, objectsTypes);
+
+    dumpResults(objectsTypes, aliases, typeUnknown);
 
     // cleanup
-    errs() << "[SVF 2.9] Cleanning up SVF results..." << "\n";
+    errs() << "[SVF 2.9] Cleanning up SVF results..."
+           << "\n";
     SVF::AndersenWaveDiff::releaseAndersenWaveDiff();
     SVF::SVFIR::releaseSVFIR();
     SVF::LLVMModuleSet::releaseLLVMModuleSet();
